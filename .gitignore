@@ -1,0 +1,8 @@
+# Mongo DB data
+data/
+logs/
+var_run_mongodb
+
+# python temporary
+.ipynb_checkpoints
+*.pyc

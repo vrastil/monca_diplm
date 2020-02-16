@@ -1,0 +1,245 @@
+""" manage database -- create, update """
+
+from __future__ import print_function
+import os
+import sys
+import pymongo
+from getpass import getpass
+import datetime
+import ipywidgets as widgets
+from IPython.display import display
+
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import numpy as np
+import datetime
+import calendar
+import csv
+
+TRANSLATE = {
+    'stav_end' : 'stav ke konci roku',
+    'stav_start' : 'stav na začátku roku',
+    'mrtve_nar_mlad' : 'mrtvě narozená mláďata',
+    'zive_nar_mlad' : 'živě narozená mláďata',
+    'uhyn_do_5d' : 'úhyn do 5 dnů',
+    'uhyn_do_3m' : 'úhyn do 3 měsíců',
+    'uhyn_do_12m' : 'úhyn do 12 měsíců',
+    'porody' : 'porody',
+    'odchov' : 'odchov'
+}
+
+OUT_OPT_DEF = {
+    'dir' : '/home/michal/Dropbox/Diplomka Monca/img_py/'
+}
+
+def create_database(host='localhost', port=27017, user='admin'):
+    """create database and user admin in it,
+    databse should be started without authentication this first time"""
+
+    print("Database server should be running without authentication on host '%s' and port '%i'" % (
+        host, port))
+    input("Press Enter to continue...")
+    client = pymongo.MongoClient(host, port)
+    db = client['admin']
+    try:
+        user = input("Username (default '%s'):" % user) or user
+        db.command("createUser", user, pwd=getpass(prompt='Password:'), roles=[{'role':'userAdminAnyDatabase','db':'admin'}, "readWriteAnyDatabase"])
+    except pymongo.errors.DuplicateKeyError as e:
+        print(e)
+    else:
+        print("User '%s' successfully created. Restart the server with authentication enabled." % user)
+
+
+def connect_db(host='localhost', port=27017, user='admin'):
+    for _ in range(3):
+        try:
+            client = pymongo.MongoClient(host, port, username=user, password=getpass(prompt='Password:'))
+            client['admin'].list_collection_names()
+        except pymongo.errors.OperationFailure as e:
+            print(e)
+        else:
+            print("Successfully conected to the database.")
+            return client
+
+def print_unique(db, field):
+    xx = sorted(db.distinct(field, {}))
+    print(field + ' (' + str(len(xx)) + '):')
+    for x in xx:
+        print('\t', x)
+
+def plot_basic(data, suptitle="", out_opt=None, bar=False):
+    fig = plt.figure(figsize=(14,10))
+    ax = plt.gca()
+
+    i = 0
+    width = 0.8/len(data)
+    for item, val in data.items():
+        val = np.array(val)
+        x = val[:,0]
+        y = val[:,1]
+        if not bar:
+            ax.plot(x, y, 'o-', label=item)
+        else:
+            x = x - 0.8 + width*i
+            ax.bar(x, y, width, label=item)
+            i += 1
+
+    ax.legend()
+    fig.suptitle(suptitle, size=30, y=0.94)
+    plt.show()
+    filename = out_opt['dir'] + out_opt['filename']
+    fig.savefig(filename, format="png")
+
+def plot_all_zoo_rok(db, druh, cat, out_opt=None):
+    query = {
+        'Druh' : druh,
+    }
+
+    proj = {
+        '_id' : 0,
+        'Rok' : 1,
+        'Zoo' : 1,
+        cat : 1
+    }
+
+    my_data = {}
+
+    for doc in db.find(query, proj):
+        zoo = doc['Zoo']
+        rok = doc['Rok']
+        narozeny = sum(list(doc[cat].values()))
+        
+        if zoo not in my_data:
+            my_data[zoo] = []
+        my_data[zoo].append([rok, narozeny])
+
+    # plot
+    if out_opt is None:
+        out_opt = OUT_OPT_DEF
+    suptitle = druh + ' (' + TRANSLATE[cat] + ')'
+    out_opt['filename'] = druh.replace(' ', '_') + '_' + cat.replace(' ', '_') + '.png'
+    plot_basic(my_data, suptitle, out_opt=out_opt)
+
+
+def plot_one_zoo_rok(db, druh, zoo, cats, out_opt=None, **kwargs):
+    query = {
+        'Druh' : druh,
+        'Zoo' : zoo
+    }
+
+    proj = {
+        '_id' : 0,
+        'Rok' : 1,
+    }
+    for cat in cats:
+        proj[cat] = 1
+
+    my_data = {TRANSLATE[cat] : [] for cat in cats}
+
+    for doc in db.find(query, proj):
+        rok = doc['Rok']
+        for cat in cats:
+            if isinstance(doc[cat], dict):
+                pocet = sum(list(doc[cat].values()))
+            else:
+                pocet = doc[cat]
+            my_data[TRANSLATE[cat]].append([rok, pocet])
+
+    # plot
+    if out_opt is None:
+        out_opt = OUT_OPT_DEF
+
+    suptitle = druh + ', ' + zoo + ' (' + out_opt['suptitle'] + ')'
+    out_opt['filename'] = druh.replace(' ', '_') + '_' + zoo.replace(' ', '_') + '_' + out_opt['suptitle'].replace(' ', '_') + '.png'
+    if 'bar' in kwargs and kwargs['bar']:
+        out_opt['filename'] = out_opt['filename'].replace('.png', '_' + ''.join([x[0] for x in cats]) + '_bar.png')
+    plot_basic(my_data, suptitle, out_opt=out_opt, **kwargs)
+
+
+def plot_cats_rok(db, druh, cats, out_opt=None):
+    if druh is not None:
+        query = {
+            'Druh' : druh,
+        }
+    else:
+        query = {}
+        druh = 'Všechny druhy'
+
+    proj = {
+        '_id' : 0,
+        'Rok' : 1,
+    }
+    for cat in cats:
+        proj[cat] = 1
+
+    my_data = {TRANSLATE[cat] : [] for cat in cats}
+
+    all_doc = list(db.find(query, proj))
+    roky = sorted(set([doc['Rok'] for doc in all_doc]))
+
+    for cat in cats:
+        my_data[TRANSLATE[cat]] = [[rok, 0] for rok in roky]
+
+    for doc in all_doc:
+        rok = doc['Rok']
+        for cat in cats:
+            pocet = sum(list(doc[cat].values()))
+            item = next(x for x in my_data[TRANSLATE[cat]] if x[0] == rok)
+            item[1] += pocet
+
+    # plot
+    if out_opt is None:
+        out_opt = OUT_OPT_DEF
+
+    suptitle = druh + ' (' + out_opt['suptitle'] + ')'
+    out_opt['filename'] = druh.replace(' ', '_') + '_' + out_opt['suptitle'].replace(' ', '_') + '.png'
+    plot_basic(my_data, suptitle, out_opt=out_opt)
+
+
+def create_table(filename, coll, *cats):
+
+    druhy = coll.distinct('Druh')
+    roky = sorted(coll.distinct('Rok'))
+    csv_file = OUT_OPT_DEF["dir"] + 'tables/' + filename
+            
+    with open(csv_file, mode='w') as a_file:
+        csv_writer = csv.writer(a_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        
+        # hlavicka
+        csv_writer.writerow([''] + roky)
+        
+        # jednotlive druhy
+        for druh in druhy:
+            row = [druh]
+            # get all data
+            match = [{cat : {"$gt" : 0}} for cat in cats]
+            group = {cat.replace('.', '@') : {"$sum" : "$" + cat} for cat in cats}
+            group["_id"] = "$Rok"
+            group["Pocet ZOO"] = {"$sum" : 1}
+            my_data = list(coll.aggregate([
+                    {"$match"  : {"Druh" : druh, "$or" : match}},
+                    {"$group" : group}
+                    ]))
+
+            # prochazej vzestupne po letetcj
+            for rok in roky:
+                # kdyz existuje zaznam, uloz ho
+                try:
+                    item = next(x for x in my_data if x['_id'] == rok)
+                    rec = ""
+                    for cat in cats:
+                        key = cat.replace('.', '@')
+                        rec +=  "%i." % item[key]
+
+                    rec = rec[:-1] + " (%i)" % item['Pocet ZOO']
+                    row.append(rec)
+                    
+                # kdyz ne, vypln prazdny zaznam
+                except:
+                    row.append('')
+
+            # print(item[key])
+                    
+            # write only non-empty rows
+            if [x for x in row[1:] if x]:
+                csv_writer.writerow(row)
