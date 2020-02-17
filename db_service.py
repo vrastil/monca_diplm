@@ -32,6 +32,73 @@ OUT_OPT_DEF = {
     'dir' : '/home/michal/Dropbox/Diplomka Monca/img_py/'
 }
 
+SETTINGS_ROCENKY = [
+    'Druh',
+    'Zoo',
+    'Rok',
+    {'stav_start' : 'samec'},
+    {'stav_start' : 'samice'},
+    {'stav_start' : 'nezname'},
+    {'prichod' : 'samec'},
+    {'prichod' : 'samice'},
+    {'prichod' : 'nezname'},
+    {'odchody' : 'samec'},
+    {'odchody' : 'samice'},
+    {'odchody' : 'nezname'},
+    {'uhyn' : 'samec'},
+    {'uhyn' : 'samice'},
+    {'uhyn' : 'nezname'},
+    {'jine_ubytky' : 'samec'},
+    {'jine_ubytky' : 'samice'},
+    'potraty',
+    'porody',
+    'uhyn_grav_samic',
+    {'mrtve_nar_mlad' : 'samec'},
+    {'mrtve_nar_mlad' : 'samice'},
+    {'mrtve_nar_mlad' : 'nezname'},
+    {'zive_nar_mlad' : 'samec'},
+    {'zive_nar_mlad' : 'samice'},
+    {'zive_nar_mlad' : 'nezname'},
+    {'uhyn_do_5d' : 'samec'},
+    {'uhyn_do_5d' : 'samice'},
+    {'uhyn_do_5d' : 'nezname'},
+    {'uhyn_do_3m' : 'samec'},
+    {'uhyn_do_3m' : 'samice'},
+    {'uhyn_do_3m' : 'nezname'},
+    {'uhyn_do_12m' : 'samec'},
+    {'uhyn_do_12m' : 'samice'},
+    {'uhyn_do_12m' : 'nezname'},
+    {'odchody2' : 'samec'},
+    {'odchody2' : 'samice'},
+    {'odchody2' : 'nezname'},
+    {'odchov' : 'samec'},
+    {'odchov' : 'samice'},
+    {'odchov' : 'nezname'},
+    {'deponace' : 'samec'},
+    {'deponace' : 'samice'},
+    {'deponace' : 'nezname'},
+    {'stav_end' : 'samec'},
+    {'stav_end' : 'samice'},
+    {'stav_end' : 'nezname'},
+]
+
+SETTINGS_KNIHY = [
+    'cislo',
+    'pohlaví',
+    'jmeno',
+    'narozen_datum',
+    'narozen_misto',
+    'prichod_DK',
+    {'vek' : 'rok'},
+    {'vek' : 'mesic'},
+    {'vek' : 'dny'},
+    'odchod_datum',
+    'odchod_zoo',
+    'poznamka',
+    {'rodice' : 'samec'},
+    {'rodice' : 'samice'},
+]
+
 def create_database(host='localhost', port=27017, user='admin'):
     """create database and user admin in it,
     databse should be started without authentication this first time"""
@@ -243,3 +310,47 @@ def create_table(filename, coll, *cats):
             # write only non-empty rows
             if [x for x in row[1:] if x]:
                 csv_writer.writerow(row)
+
+def get_num_from_str(rec):
+    if rec:
+        return int(rec)
+    else:
+        return 0
+
+def import_data(coll, a_file, settings, str_list, druh=None):
+    # get data from csv file
+    with open(a_file) as csvfile:
+        spamreader = csv.reader(csvfile, delimiter=',')
+        all_data = [row for row in spamreader if row[0] != '']
+
+    all_data_dict = []
+    # projdi vsechny radky
+    for row in all_data:
+        new_row = {}
+        # projdi vsechny zaznamy
+        for i, rec in enumerate(row):
+            key = settings[i]
+            # str list, zbytek cisla
+            if i in str_list:
+                new_row[key] = rec
+            else:
+                # primo zaznam
+                if isinstance(key, str):
+                    new_row[key] = get_num_from_str(rec)
+                # kategorie v zaznamu
+                else:
+                    key, sub_key = list(key.items())[0]
+                    if key not in new_row:
+                        new_row[key] = {}
+                    new_row[key][sub_key] = get_num_from_str(rec)
+            
+        # pridej info o druhu
+        if druh is not None and 'Druh' not in settings:
+            new_row['Druh'] = druh
+
+        # uloz dict
+        all_data_dict.append(new_row)
+
+    # insert data and get info
+    res = coll.insert_many(all_data_dict)
+    print("Vlozeno %i zaznamu." % len(res.inserted_ids))
