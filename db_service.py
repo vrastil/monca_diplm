@@ -12,7 +12,6 @@ from IPython.display import display
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
-import datetime
 import calendar
 import csv
 
@@ -354,3 +353,85 @@ def import_data(coll, a_file, settings, str_list, druh=None):
     # insert data and get info
     res = coll.insert_many(all_data_dict)
     print("Vlozeno %i zaznamu." % len(res.inserted_ids))
+
+def get_name(coll, cislo):
+    return coll.find_one({"cislo" : cislo})["jmeno"]
+
+def transformuj_datum(datum, form_in=None, form_out=None):
+    if form_in is None:
+        form_in = '%m/%d/%Y'
+
+    if form_out is None:
+        form_out = '%d.%m.%Y'
+
+    # prazdne stringy netransformuj
+    if datum:
+        # dostan datetime
+        date = datetime.datetime.strptime(datum, form_in)
+
+        # preved zas na string
+        datum = date.strftime(form_out)
+
+    return datum
+
+def get_otce(coll):
+    match = {'rodice.samec' : {"$gt" : 0}}
+    group = {
+        "_id" : "$rodice.samec",
+        "pocet_potomku" : {"$sum" : 1},
+        "potomci" : {"$push" : {
+            "cislo" : "$cislo",
+            "jmeno" : "$jmeno",
+            "vek" : "$vek",
+            "matka" : "$rodice.samice",
+            "pohlavi" : "$pohlaví",
+            "narozen" : "$narozen_datum",
+            "odchod" : "$odchod_datum",
+            "poznamka" : "$poznamka"
+        }}
+    }
+
+    data = list(coll.aggregate([
+        {"$match" : match},
+        {"$group" : group}
+    ]))
+    
+    # jmeno otce
+    for otec in data:
+        otec["jmeno"] = get_name(coll, otec["_id"])
+        for pot in otec["potomci"]:
+            # pridej jmeno matky
+            pot["matka"] = get_name(coll, pot["matka"])
+            # transformuj data
+            pot["narozen"] = transformuj_datum(pot["narozen"])
+            pot["odchod"] = transformuj_datum(pot["odchod"])
+    
+    return data
+
+def create_table_potomstva(coll, filename, otci):
+    csv_file = OUT_OPT_DEF["dir"] + 'tables/' + filename
+    
+    with open(csv_file, mode='w') as a_file:
+        csv_writer = csv.writer(a_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        
+        for otec in otci:
+            csv_writer.writerow([otec["jmeno"]])
+            csv_writer.writerow([])
+            
+            # hlavicka
+            row = ['cislo', 'pohlavi', 'rok', 'mesic', 'dny'] 
+            row += [x for x in otec["potomci"][0].keys() if x not in row if x != 'vek']
+            csv_writer.writerow(row)
+            
+            for pot in otec["potomci"]:
+                row = [pot.pop('cislo'), pot.pop('pohlavi')]
+                vek = pot.pop('vek')
+                row += vek.values()
+                for val in pot.values():
+                    row.append(val)
+                    
+                csv_writer.writerow(row)
+                
+            # 2 blank rows
+            csv_writer.writerow([])
+            csv_writer.writerow([])
