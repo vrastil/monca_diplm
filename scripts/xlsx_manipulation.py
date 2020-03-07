@@ -1,4 +1,5 @@
 import openpyxl
+from openpyxl.utils import get_column_letter
 
 def get_keys(sheet):
     """ assumed row '1' and '2' are headers """
@@ -69,6 +70,20 @@ def load_xlsx(xlsx_file, sheet_name, coll):
     res = coll.insert_many(all_docs)
     print("Vlozeno %i zaznamu." % len(res.inserted_ids))
 
+def set_columns_width(sheet):
+    column_widths = []
+    for row in sheet.iter_rows(min_row=2):
+        for i, cell in enumerate(row):
+            length = len(str(cell.value))+2
+            if len(column_widths) > i:
+                if length > column_widths[i]:
+                    column_widths[i] = length
+            else:
+                column_widths += [length]
+
+    for i, column_width in enumerate(column_widths):
+        sheet.column_dimensions[get_column_letter(i+1)].width = column_width
+
 def save_xlsx(xlsx_file, all_data):
     # open file
     wb = openpyxl.Workbook()
@@ -80,6 +95,12 @@ def save_xlsx(xlsx_file, all_data):
             sheet.append([data["header"]])
         for data_row in data["data"]:
             sheet.append(data_row)
+
+        # set proper columns width
+        set_columns_width(sheet)
+
+    # delete default sheet
+    wb.remove_sheet(wb.get_sheet_by_name('Sheet'))
 
     # save file
     wb.save(xlsx_file)
