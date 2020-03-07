@@ -58,7 +58,7 @@ def get_all_data(sheet):
     return all_docs
 
 def load_xlsx(xlsx_file, sheet_name, coll):
-    """ open xlsx file 'a_file', load data from sheets 'sheet_name'
+    """ open xlsx file 'xlsx_file', load data from sheets 'sheet_name'
     and saves data to collection 'coll' """
     # load all data
     wb = openpyxl.load_workbook(xlsx_file)
@@ -68,3 +68,18 @@ def load_xlsx(xlsx_file, sheet_name, coll):
      # insert data and get info
     res = coll.insert_many(all_docs)
     print("Vlozeno %i zaznamu." % len(res.inserted_ids))
+
+def save_xlsx(xlsx_file, all_data):
+    # open file
+    wb = openpyxl.Workbook()
+
+    # go throug all data for individual sheets
+    for data in all_data:
+        sheet = wb.create_sheet(data["sheet_name"])
+        if "header" in data:
+            sheet.append([data["header"]])
+        for data_row in data["data"]:
+            sheet.append(data_row)
+
+    # save file
+    wb.save(xlsx_file)
