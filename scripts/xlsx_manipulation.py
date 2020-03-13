@@ -88,9 +88,17 @@ def save_xlsx(xlsx_file, all_data):
     # open file
     wb = openpyxl.Workbook()
 
+    # create all sheets
+    for sheet_name in set([data["sheet_name"] for data in all_data]):
+        wb.create_sheet(sheet_name)
+
     # go throug all data for individual sheets
     for data in all_data:
-        sheet = wb.create_sheet(data["sheet_name"])
+        sheet = wb[data["sheet_name"]]
+        # two empty rows
+        sheet.append([])
+        sheet.append([])
+        
         if "header" in data:
             sheet.append([data["header"]])
         for data_row in data["data"]:
