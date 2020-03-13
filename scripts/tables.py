@@ -128,12 +128,11 @@ def get_otce(coll, druh, ZOO):
     return data
 
 def create_table_potomstva(coll, druh, ZOO):
-    data = []
+    all_data = {}
     otci = get_otce(coll, druh, ZOO)
         
     for otec in otci:
-        data.append([otec["jmeno"]])
-        data.append([])
+        all_data[otec["jmeno"]] = data = []
         
         # hlavicka
         row = ['cislo', 'pohlavi', 'rok', 'mesic', 'dny'] 
@@ -146,14 +145,9 @@ def create_table_potomstva(coll, druh, ZOO):
             row += vek.values()
             for val in pot.values():
                 row.append(val)
-                
             data.append(row)
-            
-        # 2 blank rows
-        data.append([])
-        data.append([])
 
-    return data
+    return all_data
 
 def get_mul_lines(key):
     # special character for dot
@@ -252,17 +246,39 @@ def save_tex(tex_file, data, caption, num_h_rows=1):
         a_file.write(u"\\caption{%s}\n" % caption)
         a_file.write("\\end{table}\n")
 
-def create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows):
+def tex_potomstvo(tex_file, all_data, caption, num_h_rows=1):
+    with open(tex_file, 'w') as a_file:
+        for otec, data in all_data.items():
+            caption_otec = "%s, potomstvo (%s)" % (otec, caption)
+            file_otec = tex_file.replace(".tex", "_%s.tex" % otec.replace(" ", "_"))
+            save_tex(file_otec, data, caption_otec, num_h_rows)
+            a_file.write(u"\\input{../data/tables/%s}\n" % file_otec.split('/')[-1])
+
+def xls_potomstvo(all_data):
+    xls_data = []
+    for otec, data in all_data.items():
+        xls_data.append([otec])
+        xls_data += data
+        
+        # 2 blank rows
+        xls_data += [[], []]
+
+    return xls_data
+
+def create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func=save_tex, xls_func=None):
         print("\tTabulka %i: %s" % (i+1, caption))
+        # get data
         data = data_func(**kwargs)
+        data_xls = xls_func(data) if xls_func is not None else data
+
         # save data for xlsx
         all_data.append({
             "sheet_name" : sheet_name,
-            "data" : data,
+            "data" : data_xls,
             "header" : caption,
         })
         # save .tex file
-        save_tex(tex_file, data, caption, num_h_rows)
+        tex_func(tex_file, data, caption, num_h_rows)
 
 def create_all_tables(out_opt, data, data_book):
     table_setting = [
@@ -329,8 +345,10 @@ def create_all_tables(out_opt, data, data_book):
                 'druh' : "Lemur kata",
                 'ZOO' : "Dvůr Králové",
             },
+            'tex_func' : tex_potomstvo,
+            'xls_func' : xls_potomstvo,
             'sheet_name' : 'lemur_kata_potomstvo',
-            'caption' : "Otci, Lemur kata, Dvůr Králové",
+            'caption' : "Lemur kata, Dvůr Králové",
             'tex_file' : 'lemur_kata_potomstvo.tex',
         },
         {
@@ -356,6 +374,8 @@ def create_all_tables(out_opt, data, data_book):
         num_h_rows = setting.get('num_h_rows', 1)
         tex_file = out_opt['dir'] + 'tables/' + setting['tex_file']
         data_func = setting['data_func']
+        tex_func = setting.get("tex_func", save_tex)
+        xls_func = setting.get("xls_func", None)
 
         if "duplicate" in setting:
             for min_year, max_year in zip(setting["duplicate"]["min_year"], setting["duplicate"]["max_year"]):
@@ -370,9 +390,9 @@ def create_all_tables(out_opt, data, data_book):
                 tex_file = tex_file.replace("MAX_YEAR", str(max_year))
                 kwargs["min_year"] = min_year
                 kwargs["max_year"] = max_year
-                create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows)   
+                create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func, xls_func)
         else:
-            create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows)
+            create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func, xls_func)
 
     # save all
     xlsx_file = out_opt['dir'] + 'tables/zpracovane_vse.xlsx'
