@@ -1,5 +1,5 @@
 from __future__ import print_function
-
+import unidecode
 import datetime
 
 import xlsx_manipulation as xls
@@ -71,7 +71,11 @@ def get_num_from_str(rec):
         return 0
 
 def get_name(coll, druh, ZOO, cislo):
-    return coll.find_one({"Druh" : druh, "ZOO" : ZOO, "číslo" : cislo})["jméno"]
+    doc = coll.find_one({"Druh" : druh, "ZOO" : ZOO, "číslo" : cislo})
+    if doc:
+        return doc["jméno"]
+    else:
+        return "UNK (%s)" % str(cislo)
 
 def transformuj_datum(datum, form_in=None, form_out=None):
     if form_in is None:
@@ -127,12 +131,13 @@ def get_otce(coll, druh, ZOO):
     
     return data
 
-def create_table_potomstva(coll, druh, ZOO):
-    all_data = {}
+def create_table_potomstva(coll, druh, ZOO, all_data=None):
+    if all_data is None:
+        all_data = []
     otci = get_otce(coll, druh, ZOO)
         
     for otec in otci:
-        all_data[otec["jmeno"]] = data = []
+        data = []
         
         # hlavicka
         row = ['cislo', 'pohlavi', 'rok', 'mesic', 'dny'] 
@@ -146,8 +151,21 @@ def create_table_potomstva(coll, druh, ZOO):
             for val in pot.values():
                 row.append(val)
             data.append(row)
+        all_data.append({
+            "otec" : otec["jmeno"],
+            "data" : data,
+            "caption" : "%s, potomstvo (%s, %s)" % (otec["jmeno"], druh, ZOO)
+        })
 
     return all_data
+
+def create_table_potomstva_all(coll):
+    all_data = []
+    for ZOO in coll.distinct('ZOO', {}):
+        for druh in coll.distinct('Druh', {}):
+            create_table_potomstva(coll, druh, ZOO, all_data=all_data)
+    return all_data
+
 
 def get_mul_lines(key):
     # special character for dot
@@ -219,13 +237,14 @@ def create_table_history(coll):
 
     return data
 
-def save_tex(tex_file, data, caption, num_h_rows=1):
+def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5):
     with open(tex_file, 'w') as a_file:
         # get length
         length = len(data[0]) - 1
 
         # write header
         a_file.write(u"\\begin{table}\n")
+        a_file.write(u"\\begin{adjustwidth}{%.1fcm}{}\n" % adjustwidth)
         a_file.write(u"\\begin{tabular}{l" + 'c'*length + "}\n")
         a_file.write(u"\t\\hline\n")
         for i in range(num_h_rows):
@@ -244,19 +263,25 @@ def save_tex(tex_file, data, caption, num_h_rows=1):
         a_file.write("\t\\hline\n")
         a_file.write("\\end{tabular}\n")
         a_file.write(u"\\caption{%s}\n" % caption)
+        a_file.write("\\end{adjustwidth}\n")
         a_file.write("\\end{table}\n")
 
-def tex_potomstvo(tex_file, all_data, caption, num_h_rows=1):
+def tex_potomstvo(tex_file, all_data, caption, num_h_rows=1, adjustwidth=-2.5):
     with open(tex_file, 'w') as a_file:
-        for otec, data in all_data.items():
-            caption_otec = "%s, potomstvo (%s)" % (otec, caption)
+        for val in all_data:
+            otec = val["otec"]
+            data = val["data"]
+            caption_otec = val["caption"]
             file_otec = tex_file.replace(".tex", "_%s.tex" % otec.replace(" ", "_"))
-            save_tex(file_otec, data, caption_otec, num_h_rows)
+            file_otec = unidecode.unidecode(file_otec)
+            save_tex(file_otec, data, caption_otec, num_h_rows, adjustwidth=-2.5)
             a_file.write(u"\\input{../data/tables/%s}\n" % file_otec.split('/')[-1])
 
 def xls_potomstvo(all_data):
     xls_data = []
-    for otec, data in all_data.items():
+    for val in all_data:
+        otec = val["otec"]
+        data = val["data"]
         xls_data.append([otec])
         xls_data += data
         
@@ -265,8 +290,88 @@ def xls_potomstvo(all_data):
 
     return xls_data
 
-def create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func=save_tex, xls_func=None):
-        print("\tTabulka %i: %s" % (i+1, caption))
+def get_birth_by_druh_month(coll):
+    match = {"narozen": {"$type": 9}}
+    project = {
+                "month": {"$month": "$narozen"},
+                "Druh" : "$Druh",
+                "ZOO" : "$ZOO"
+                
+            }
+
+    group = {x : {"$sum" : {"$cond": [{"$eq": ['$Druh', x]}, 1, 0]}} for x in coll.distinct("Druh")}
+    group["_id"] = "$month"
+    group["Celkem"] = {"$sum" : 1}
+
+    cursor = coll.aggregate([
+        {"$match" : match},
+        {"$project": project},
+        { "$group" :group}
+    ])
+
+    return list(cursor)
+
+def get_birth_by_druh(coll):
+    match = {"narozen": {"$type": 9}}
+    project = {
+                "month": {"$month": "$narozen"},
+                "Druh" : "$Druh",
+                "ZOO" : "$ZOO"
+                
+            }
+
+    group = {x : {"$sum" : {"$cond": [{"$eq": ['$Druh', x]}, 1, 0]}} for x in coll.distinct("Druh")}
+    group["_id"] = "$month"
+    group["Celkem"] = {"$sum" : 1}
+    group2 = {x : {"$sum" : "$%s" % x} for x in coll.distinct("Druh")}
+    group2["_id"] = None
+    group2["Celkem"] = {"$sum" : "$Celkem"}
+    cursor = coll.aggregate([
+        {"$match" : match},
+        {"$project": project},
+        {"$group" :group},
+        {"$group": group2}
+    ])
+
+    data = list(cursor)[0]
+    data.pop('_id')
+    return data
+
+def create_table_narozeni_abs(coll):
+    # hlavicka
+    months = list(range(1, 13)) 
+    data_all = [[''] + months]
+
+    # data
+    data = get_birth_by_druh_month(coll)
+    keys = [x for x in data[0] if x != '_id']
+
+    # prochazej po lemurech
+    for key in keys:
+        row = [key]
+        # pro jednotlive mesice
+        for month in months:
+            try:
+                val = next((x[key] for x in data if x['_id'] == month))
+            except StopIteration:
+                val = 0
+            row.append(val)
+        data_all.append(row)
+
+    return data_all
+
+def create_table_narozeni_rel(coll):
+    data_all = create_table_narozeni_abs(coll)
+    data_celkem = get_birth_by_druh(coll)
+    # hlavicku nech
+    for row in data_all[1:]:
+        key = row[0]
+        for i, val in enumerate(row[1:]):
+            row[i+1] = "%.1f" % (val*100.0/data_celkem[key])
+    return data_all
+
+def create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func=save_tex, xls_func=None, adjustwidth=-0.5):
+        print("  Tabulka %i: %s" % (i+1, caption))
         # get data
         data = data_func(**kwargs)
         data_xls = xls_func(data) if xls_func is not None else data
@@ -278,15 +383,15 @@ def create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_fi
             "header" : caption,
         })
         # save .tex file
-        tex_func(tex_file, data, caption, num_h_rows)
+        tex_func(tex_file, data, caption, num_h_rows, adjustwidth)
 
-def create_all_tables(out_opt, data, data_book):
+def create_all_tables(out_opt, coll_roc, coll_knihy):
     table_setting = [
                 {
             'data_func' : create_table,
             'kwargs' : {
                 'cats' : ["stav k začátku roku.samec", "stav k začátku roku.samice", "stav k začátku roku.stav k začátku roku"],
-                'coll' : data,
+                'coll' : coll_roc,
             },
             'duplicate' : {
                 'min_year' : [1973, 1991, 2001, 2010],
@@ -300,7 +405,7 @@ def create_all_tables(out_opt, data, data_book):
             'data_func' : create_table,
             'kwargs' : {
                 'cats' : ["odchov.samec", "odchov.samice", "odchov.nezname"],
-                'coll' : data,
+                'coll' : coll_roc,
             },
             'duplicate' : {
                 'min_year' : [1973, 1991, 2001, 2010],
@@ -314,7 +419,7 @@ def create_all_tables(out_opt, data, data_book):
             'data_func' : create_table,
             'kwargs' : {
                 'cats' : ["živě narozená mláďata.samec", "živě narozená mláďata.samice", "živě narozená mláďata.nezname"],
-                'coll' : data,
+                'coll' : coll_roc,
             },
             'duplicate' : {
                 'min_year' : [1973, 1991, 2001, 2010],
@@ -328,7 +433,7 @@ def create_all_tables(out_opt, data, data_book):
             'data_func' : create_table,
             'kwargs' : {
                 'cats' : ["mrtvě narozená mláďata.samec", "mrtvě narozená mláďata.samice", "mrtvě narozená mláďata.nezname"],
-                'coll' : data,
+                'coll' : coll_roc,
             },
             'duplicate' : {
                 'min_year' : [1973, 1991, 2001, 2010],
@@ -339,27 +444,46 @@ def create_all_tables(out_opt, data, data_book):
             'tex_file' : 'druhy_mrtve_narozena_MIN_YEAR_MAX_YEAR.tex',
         },
         {
-            'data_func' : create_table_potomstva,
+            'data_func' : create_table_potomstva_all,
             'kwargs' : {
-                'coll' : data_book,
-                'druh' : "Lemur kata",
-                'ZOO' : "Dvůr Králové",
+                'coll' : coll_knihy,
+
             },
             'tex_func' : tex_potomstvo,
             'xls_func' : xls_potomstvo,
-            'sheet_name' : 'lemur_kata_potomstvo',
-            'caption' : "Lemur kata, Dvůr Králové",
-            'tex_file' : 'lemur_kata_potomstvo.tex',
+            'sheet_name' : 'potomstvo',
+            'caption' : "Potomci lemuru (vsechny druhy, vsechny ZOO)",
+            'tex_file' : 'potomstvo.tex',
         },
         {
             'data_func' : create_table_history,
             'kwargs' : {
-                'coll' : data,
+                'coll' : coll_roc,
             },
             'sheet_name' : 'historie_chovu',
             'caption' : "Historie chovu lemurů v ČR v letech 1973-%i" % LAST_YEAR,
             'tex_file' : 'historie_chovu.tex',
             'num_h_rows' : 2
+        },
+        {
+            'data_func' : create_table_narozeni_abs,
+            'kwargs' : {
+                'coll' : coll_knihy,
+            },
+            'sheet_name' : 'narozeni_mesice',
+            'caption' : "Absolutní počty narození dle měsíce",
+            'tex_file' : 'narozeni_mesice_abs.tex',
+            'adjustwidth' : -2.5
+        },
+        {
+            'data_func' : create_table_narozeni_rel,
+            'kwargs' : {
+                'coll' : coll_knihy,
+            },
+            'sheet_name' : 'narozeni_mesice',
+            'caption' : "Relativní počty narození (v \\%) dle měsíce",
+            'tex_file' : 'narozeni_mesice_rel.tex',
+            'adjustwidth' : -2.5
         },
     ]
 
@@ -375,6 +499,7 @@ def create_all_tables(out_opt, data, data_book):
         tex_file = out_opt['dir'] + 'tables/' + setting['tex_file']
         data_func = setting['data_func']
         tex_func = setting.get("tex_func", save_tex)
+        adjustwidth = setting.get("adjustwidth", -0.5)
         xls_func = setting.get("xls_func", None)
 
         if "duplicate" in setting:
@@ -390,9 +515,9 @@ def create_all_tables(out_opt, data, data_book):
                 tex_file = tex_file.replace("MAX_YEAR", str(max_year))
                 kwargs["min_year"] = min_year
                 kwargs["max_year"] = max_year
-                create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func, xls_func)
+                create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func, xls_func, adjustwidth)
         else:
-            create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func, xls_func)
+            create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func, xls_func, adjustwidth)
 
     # save all
     xlsx_file = out_opt['dir'] + 'tables/zpracovane_vse.xlsx'
