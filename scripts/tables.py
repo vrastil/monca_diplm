@@ -159,35 +159,83 @@ def get_otce(coll, druh, ZOO):
     
     return data
 
+def get_matky(coll, druh, ZOO):
+    match = {'ZOO' : ZOO, 'Druh' : druh, 'Rodiče.Samice' : {"$gt" : 0}}
+    group = {
+        "_id" : "$Rodiče.Samice",
+        "pocet_potomku" : {"$sum" : 1},
+        "potomci" : {"$push" : {
+            "Číslo" : "$číslo",
+            "jmeno" : "$jméno",
+            "vek" : "$věk",
+            "Otec" : "$Rodiče.Samec",
+            "Sex" : "$pohlaví",
+            "Narození" : "$narozen",
+            "Odchod" : "$odchod",
+            "Poznámka" : "$poznámka"
+        }}
+    }
+
+    data = list(coll.aggregate([
+        {"$match" : match},
+        {"$group" : group}
+    ]))
+    
+    # jmeno otce
+    for matka in data:
+        matka["jmeno"] = get_name(coll, druh, ZOO, matka["_id"])
+        for pot in matka["potomci"]:
+            # pridej jmeno matky
+            pot["Otec"] = get_name(coll, druh, ZOO, pot["Otec"])
+            # transformuj data
+            pot["Narození"] = transformuj_datum(pot["Narození"])
+            pot["Odchod"] = transformuj_datum(pot["Odchod"])
+            # pridej uhyn
+            pot["Úhyn"] = get_time_of_death(pot)
+    
+    return data
+
 def create_table_potomstva(coll, druh, ZOO, all_data=None):
     if all_data is None:
         all_data = []
+
+    # get otce, save otce
     otci = get_otce(coll, druh, ZOO)
-        
     for otec in otci:
         data = []
         
         # hlavicka
         header = ['Číslo', 'Sex', 'Narození', 'Matka', 'Úhyn', 'Odchod', 'Poznámka'] 
-        # row = ['Číslo', 'Sex', 'rok', 'mesic', 'dny'] 
-        # row += [x for x in otec["potomci"][0].keys() if x not in row if x != 'vek']
         data.append(header)
         
         for pot in otec["potomci"]:
             row = [pot[x] for x in header]
-            # row = [pot.pop('Číslo'), pot.pop('Sex')]
-            # vek = pot.pop('vek')
-            # row += vek.values()
-            # for val in pot.values():
-            #     row.append(val)
             data.append(row)
         all_data.append({
-            "otec" : otec["jmeno"],
+            "rodic" : otec["jmeno"],
             "data" : data,
             "caption" : "Potomci samce druhu %s (\\textit{%s}) jménem %s v ZOO %s k 31.12.%i" % (
                 druh, TRANSLATE[druh], otec["jmeno"], ZOO, LAST_YEAR)
         })
-
+        
+    # get matky, save matky
+    matky = get_matky(coll, druh, ZOO)
+    for matka in matky:
+        data = []
+        
+        # hlavicka
+        header = ['Číslo', 'Sex', 'Narození', 'Otec', 'Úhyn', 'Odchod', 'Poznámka'] 
+        data.append(header)
+        
+        for pot in matka["potomci"]:
+            row = [pot[x] for x in header]
+            data.append(row)
+        all_data.append({
+            "rodic" : matka["jmeno"],
+            "data" : data,
+            "caption" : "Potomci samice druhu %s (\\textit{%s}) jménem %s v ZOO %s k 31.12.%i" % (
+                druh, TRANSLATE[druh], otec["jmeno"], ZOO, LAST_YEAR)
+        })
     return all_data
 
 def create_table_potomstva_all(coll):
@@ -300,10 +348,10 @@ def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5):
 def tex_potomstvo(tex_file, all_data, caption, num_h_rows=1, adjustwidth=-2.5):
     with open(tex_file, 'w') as a_file:
         for val in all_data:
-            otec = val["otec"]
+            rodic = val["rodic"]
             data = val["data"]
             caption_otec = val["caption"]
-            file_otec = tex_file.replace(".tex", "_%s.tex" % otec.replace(" ", "_"))
+            file_otec = tex_file.replace(".tex", "_%s.tex" % rodic.replace(" ", "_"))
             file_otec = unidecode.unidecode(file_otec)
             save_tex(file_otec, data, caption_otec, num_h_rows, adjustwidth=-2.5)
             a_file.write(u"\\input{../data/tables/%s}\n" % file_otec.split('/')[-1])
@@ -311,9 +359,9 @@ def tex_potomstvo(tex_file, all_data, caption, num_h_rows=1, adjustwidth=-2.5):
 def xls_potomstvo(all_data):
     xls_data = []
     for val in all_data:
-        otec = val["otec"]
+        rodic = val["rodic"]
         data = val["data"]
-        xls_data.append([otec])
+        xls_data.append([rodic])
         xls_data += data
         
         # 2 blank rows
