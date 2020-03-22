@@ -90,11 +90,20 @@ def get_name(coll, druh, ZOO, cislo):
     else:
         return "UNK (%s)" % str(cislo)
 
+def get_val_from_keys(a_dict, keys):
+    for key in keys:
+        if key in a_dict:
+            return a_dict[key], key
+    else:
+        return None, None
+
 def get_time_of_death(pot):
-    if pot['Poznámka'] == "Úhyn":
-        pot['Poznámka'] = ""
-        narozen = transformuj_datum(pot["Narození"], form_in='out', form_out=False)
-        vek = relativedelta(days=pot['vek']['dny'], months=pot['vek']['měsíce'], years=pot['vek']['roky'])
+    pozn, key = get_val_from_keys(pot, ['Poznámka', 'poznámka'])
+    if pozn == "Úhyn":
+        pot[key] = ""
+        datum, _ = get_val_from_keys(pot, ["Narození", "narozen"])
+        narozen = transformuj_datum(datum, form_in='out', form_out=False)
+        vek = relativedelta(days=pot['věk']['dny'], months=pot['věk']['měsíce'], years=pot['věk']['roky'])
         return transformuj_datum(vek+narozen)
     else:
         return ""
@@ -123,6 +132,32 @@ def transformuj_datum(datum, form_in=None, form_out=None):
 
     return datum
 
+
+def is_odchovany(pot):
+    vek, _ = get_val_from_keys(pot, keys=['vek', 'věk'])
+    vek = relativedelta(days=vek['dny'], months=vek['měsíce'], years=vek['roky'])
+    limit = relativedelta(years=0, month=6, day=0)
+    base_date = datetime.datetime(year=1950, month=1, day=1) # arbitrary
+
+    return (base_date + vek) > (base_date + limit)
+
+def get_num_pot(potomci):
+    # narozeny
+    male = [x for x in potomci if x['Sex'] == 'M']
+    female = [x for x in potomci if x['Sex'] == 'F']
+    unknown = [x for x in potomci if x not in male if x not in female]
+    pocet = "%i.%i.%i" % (len(male), len(female), len(unknown))
+
+    # odchovany
+    male = [x for x in male if is_odchovany(x)]
+    female = [x for x in female if is_odchovany(x)]
+    unknown = [x for x in unknown if is_odchovany(x)]
+    odchovano = "%i.%i.%i" % (len(male), len(female), len(unknown))
+
+    # return
+    return pocet, odchovano
+
+
 def get_otce(coll, druh, ZOO):
     match = {'ZOO' : ZOO, 'Druh' : druh, 'Rodiče.Samec' : {"$gt" : 0}}
     group = {
@@ -130,8 +165,8 @@ def get_otce(coll, druh, ZOO):
         "pocet_potomku" : {"$sum" : 1},
         "potomci" : {"$push" : {
             "Číslo" : "$číslo",
-            "jmeno" : "$jméno",
-            "vek" : "$věk",
+            "Jméno" : "$jméno",
+            "věk" : "$věk",
             "Matka" : "$Rodiče.Samice",
             "Sex" : "$pohlaví",
             "Narození" : "$narozen",
@@ -147,7 +182,8 @@ def get_otce(coll, druh, ZOO):
     
     # jmeno otce
     for otec in data:
-        otec["jmeno"] = get_name(coll, druh, ZOO, otec["_id"])
+        otec["Jméno"] = get_name(coll, druh, ZOO, otec["_id"])
+        
         for pot in otec["potomci"]:
             # pridej jmeno matky
             pot["Matka"] = get_name(coll, druh, ZOO, pot["Matka"])
@@ -156,6 +192,18 @@ def get_otce(coll, druh, ZOO):
             pot["Odchod"] = transformuj_datum(pot["Odchod"])
             # pridej uhyn
             pot["Úhyn"] = get_time_of_death(pot)
+
+        # additional info for other tables
+        doc = coll.find_one({"Druh" : druh, "ZOO" : ZOO, "číslo" : otec["_id"]})
+        otec["Číslo"] = otec["_id"]
+        if doc:
+            otec["Narození"] = transformuj_datum(doc["narozen"])
+            otec["místo narození"] = " " + doc["místo narození"]
+            otec["Úhyn"] = get_time_of_death(doc)
+            otec["Odchod"] = transformuj_datum(doc["odchod"])
+        else:
+            otec["Narození"] = otec["Úhyn"] = otec["Odchod"] = otec["místo narození"] = ""
+        otec["Počet mláďat"], otec["Odchováno"] = get_num_pot(otec["potomci"])
     
     return data
 
@@ -166,8 +214,8 @@ def get_matky(coll, druh, ZOO):
         "pocet_potomku" : {"$sum" : 1},
         "potomci" : {"$push" : {
             "Číslo" : "$číslo",
-            "jmeno" : "$jméno",
-            "vek" : "$věk",
+            "Jméno" : "$jméno",
+            "věk" : "$věk",
             "Otec" : "$Rodiče.Samec",
             "Sex" : "$pohlaví",
             "Narození" : "$narozen",
@@ -181,17 +229,31 @@ def get_matky(coll, druh, ZOO):
         {"$group" : group}
     ]))
     
-    # jmeno otce
+    # jmeno matky
     for matka in data:
-        matka["jmeno"] = get_name(coll, druh, ZOO, matka["_id"])
+        matka["Jméno"] = get_name(coll, druh, ZOO, matka["_id"])
         for pot in matka["potomci"]:
-            # pridej jmeno matky
+            # pridej jmeno otce
             pot["Otec"] = get_name(coll, druh, ZOO, pot["Otec"])
             # transformuj data
             pot["Narození"] = transformuj_datum(pot["Narození"])
             pot["Odchod"] = transformuj_datum(pot["Odchod"])
             # pridej uhyn
             pot["Úhyn"] = get_time_of_death(pot)
+
+        # additional info for other tables
+        doc = coll.find_one({"Druh" : druh, "ZOO" : ZOO, "číslo" : matka["_id"]})
+        matka["Číslo"] = matka["_id"]
+        if doc:
+            matka["Narození"] = transformuj_datum(doc["narozen"])
+            matka["místo narození"] = " " + doc["místo narození"]
+            matka["Úhyn"] = get_time_of_death(doc)
+            matka["Odchod"] = transformuj_datum(doc["odchod"])
+        else:
+            matka["Narození"] = matka["Úhyn"] = matka["Odchod"] = matka["místo narození"] = ""
+
+
+        matka["Počet mláďat"], matka["Odchováno"] = get_num_pot(matka["potomci"])
     
     return data
 
@@ -212,10 +274,12 @@ def create_table_potomstva(coll, druh, ZOO, all_data=None):
             row = [pot[x] for x in header]
             data.append(row)
         all_data.append({
-            "rodic" : otec["jmeno"],
+            "rodic" : otec["Jméno"],
+            "druh" : druh,
+            "ZOO" : ZOO,
             "data" : data,
             "caption" : "Potomci samce druhu %s (\\textit{%s}) jménem %s v ZOO %s k 31.12.%i" % (
-                druh, TRANSLATE[druh], otec["jmeno"], ZOO, LAST_YEAR)
+                druh, TRANSLATE[druh], otec["Jméno"], ZOO, LAST_YEAR)
         })
         
     # get matky, save matky
@@ -231,11 +295,71 @@ def create_table_potomstva(coll, druh, ZOO, all_data=None):
             row = [pot[x] for x in header]
             data.append(row)
         all_data.append({
-            "rodic" : matka["jmeno"],
+            "rodic" : matka["Jméno"],
+            "druh" : druh,
+            "ZOO" : ZOO,
             "data" : data,
             "caption" : "Potomci samice druhu %s (\\textit{%s}) jménem %s v ZOO %s k 31.12.%i" % (
-                druh, TRANSLATE[druh], otec["jmeno"], ZOO, LAST_YEAR)
+                druh, TRANSLATE[druh], matka["Jméno"], ZOO, LAST_YEAR)
         })
+    return all_data
+
+def create_table_potomstva_summary(coll, druh, ZOO, all_data=None):
+    if all_data is None:
+        all_data = []
+        
+    # hlavicka
+    header = ['Číslo', 'Jméno', 'Narození', 'Úhyn', 'Odchod', 'Počet mláďat', 'Odchováno']
+    first_y = LAST_YEAR
+
+    # get otce, save otce
+    data = [header]
+    otci = sorted(get_otce(coll, druh, ZOO), key=lambda x: x['Číslo'])
+    for otec in otci:
+        narozen = transformuj_datum(otec['Narození'], form_in='out', form_out=False)
+        if narozen:
+            first_y = min(first_y, narozen.year)
+        otec["Narození"] += otec["místo narození"]
+        row = [otec[x] for x in header]
+        data.append(row)
+    
+    # do not save empty data
+    if len(data) > 1:
+        all_data.append({
+            "rodic" : "samec %s %s" % (druh, ZOO),
+            "druh" : druh,
+            "ZOO" : ZOO,
+            "data" : data,
+            "caption" : "Chovní samci druhu %s (\\textit{%s}) v ZOO %s v letech %i---%i" % (
+                druh, TRANSLATE[druh], ZOO, first_y, LAST_YEAR)
+        })
+        
+    # hlavicka
+    header = ['Číslo', 'Jméno', 'Narození', 'Úhyn', 'Odchod', 'Počet mláďat', 'Odchováno']
+    first_y = LAST_YEAR
+
+    # get matky, save matky
+    data = [header]
+    matky = sorted(get_matky(coll, druh, ZOO), key=lambda x: x['Číslo'])
+    for matka in matky:
+        narozen = transformuj_datum(matka['Narození'], form_in='out', form_out=False)
+        if narozen:
+            first_y = min(first_y, narozen.year)
+        matka["Narození"] += matka["místo narození"]
+        row = [matka[x] for x in header]
+        data.append(row)
+    
+    # do not save empty data
+    if len(data) > 1:
+        all_data.append({
+            "rodic" : "samice %s %s" % (druh, ZOO),
+            "druh" : druh,
+            "ZOO" : ZOO,
+            "data" : data,
+            "caption" : "Chovné samice druhu %s (\\textit{%s}) v ZOO %s v letech %i---%i" % (
+                druh, TRANSLATE[druh], ZOO, first_y, LAST_YEAR)
+        })
+        
     return all_data
 
 def create_table_potomstva_all(coll):
@@ -245,6 +369,12 @@ def create_table_potomstva_all(coll):
             create_table_potomstva(coll, druh, ZOO, all_data=all_data)
     return all_data
 
+def create_table_potomstva_summary_all(coll):
+    all_data = []
+    for ZOO in coll.distinct('ZOO', {}):
+        for druh in coll.distinct('Druh', {}):
+            create_table_potomstva_summary(coll, druh, ZOO, all_data=all_data)
+    return all_data
 
 def get_mul_lines(key):
     # special character for dot
@@ -347,7 +477,18 @@ def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5):
 
 def tex_potomstvo(tex_file, all_data, caption, num_h_rows=1, adjustwidth=-2.5):
     with open(tex_file, 'w') as a_file:
+        zoo = last_zoo = None
         for val in all_data:
+            zoo = val['ZOO']
+            # clear page for every ZOO
+            if last_zoo is None:
+                a_file.write(u"\\subsection{%s}\n" % zoo)
+            elif zoo != last_zoo:
+                a_file.write(u"\\clearpage% Flush page\n")
+                a_file.write(u"\\subsection{%s}\n" % zoo)
+
+            last_zoo = zoo
+
             rodic = val["rodic"]
             data = val["data"]
             caption_otec = val["caption"]
@@ -563,6 +704,18 @@ def create_all_tables(out_opt, coll_roc, coll_knihy):
             'caption' : "Relativní počty narození (v \\%) dle měsíce",
             'tex_file' : 'narozeni_mesice_rel.tex',
             'adjustwidth' : -2.5
+        },
+        {
+            'data_func' : create_table_potomstva_summary_all,
+            'kwargs' : {
+                'coll' : coll_knihy,
+
+            },
+            'tex_func' : tex_potomstvo,
+            'xls_func' : xls_potomstvo,
+            'sheet_name' : 'potomstvo_souhrn',
+            'caption' : "Potomci lemuru, souhrn (vsechny druhy, vsechny ZOO)",
+            'tex_file' : 'potomstvo_souhrn.tex',
         },
     ]
 
