@@ -1,10 +1,23 @@
 from __future__ import print_function
 import unidecode
 import datetime
+from dateutil.relativedelta import relativedelta
 
 import xlsx_manipulation as xls
 
 LAST_YEAR = 2018
+
+TRANSLATE = {
+    'Lemur kata': 'Lemur catta',
+    'Lemur běločelý': 'Eulemur albifrons',
+    'Vari červený': 'Varecia rubra',
+    'Lemur mongoz': 'Eulemur mongoz',
+    'Lemur korunkatý': 'Eulemur coronatus',
+    'Lemur Sclaterův': 'Eulemur flavifrons',
+    'Lemur červenobřichý': 'Eulemur rubriventer',
+    'Lemur tmavý': 'Eulemur macaco',
+    'Lemur vari': 'Varecia variegata',
+}
 
 def create_table(coll, cats, min_year=None, max_year=None):
 
@@ -77,9 +90,20 @@ def get_name(coll, druh, ZOO, cislo):
     else:
         return "UNK (%s)" % str(cislo)
 
+def get_time_of_death(pot):
+    if pot['Poznámka'] == "Úhyn":
+        pot['Poznámka'] = ""
+        narozen = transformuj_datum(pot["Narození"], form_in='out', form_out=False)
+        vek = relativedelta(days=pot['vek']['dny'], months=pot['vek']['měsíce'], years=pot['vek']['roky'])
+        return transformuj_datum(vek+narozen)
+    else:
+        return ""
+
 def transformuj_datum(datum, form_in=None, form_out=None):
     if form_in is None:
         form_in = '%m/%d/%Y'
+    elif form_in == 'out':
+        form_in = '%d.%m.%Y'
 
     if form_out is None:
         form_out = '%d.%m.%Y'
@@ -87,13 +111,15 @@ def transformuj_datum(datum, form_in=None, form_out=None):
     # prazdne stringy netransformuj
     if datum:
         # dostan datetime
-        if isinstance(datum, str):
-            date = datetime.datetime.strptime(datum, form_in)
-        else:
-            date = datum
+        if isinstance(datum, str) and form_in:
+            datum = datetime.datetime.strptime(datum, form_in)
 
         # preved zas na string
-        datum = date.strftime(form_out)
+        if form_out:
+            datum = datum.strftime(form_out)
+    # 0 preved na prazdny string
+    else:
+        datum = ''
 
     return datum
 
@@ -103,14 +129,14 @@ def get_otce(coll, druh, ZOO):
         "_id" : "$Rodiče.Samec",
         "pocet_potomku" : {"$sum" : 1},
         "potomci" : {"$push" : {
-            "cislo" : "$číslo",
+            "Číslo" : "$číslo",
             "jmeno" : "$jméno",
             "vek" : "$věk",
-            "matka" : "$Rodiče.Samice",
-            "pohlavi" : "$pohlaví",
-            "narozen" : "$narozen",
-            "odchod" : "$odchod",
-            "poznamka" : "$poznámka"
+            "Matka" : "$Rodiče.Samice",
+            "Sex" : "$pohlaví",
+            "Narození" : "$narozen",
+            "Odchod" : "$odchod",
+            "Poznámka" : "$poznámka"
         }}
     }
 
@@ -124,10 +150,12 @@ def get_otce(coll, druh, ZOO):
         otec["jmeno"] = get_name(coll, druh, ZOO, otec["_id"])
         for pot in otec["potomci"]:
             # pridej jmeno matky
-            pot["matka"] = get_name(coll, druh, ZOO, pot["matka"])
+            pot["Matka"] = get_name(coll, druh, ZOO, pot["Matka"])
             # transformuj data
-            pot["narozen"] = transformuj_datum(pot["narozen"])
-            pot["odchod"] = transformuj_datum(pot["odchod"])
+            pot["Narození"] = transformuj_datum(pot["Narození"])
+            pot["Odchod"] = transformuj_datum(pot["Odchod"])
+            # pridej uhyn
+            pot["Úhyn"] = get_time_of_death(pot)
     
     return data
 
@@ -140,21 +168,24 @@ def create_table_potomstva(coll, druh, ZOO, all_data=None):
         data = []
         
         # hlavicka
-        row = ['cislo', 'pohlavi', 'rok', 'mesic', 'dny'] 
-        row += [x for x in otec["potomci"][0].keys() if x not in row if x != 'vek']
-        data.append(row)
+        header = ['Číslo', 'Sex', 'Narození', 'Matka', 'Úhyn', 'Odchod', 'Poznámka'] 
+        # row = ['Číslo', 'Sex', 'rok', 'mesic', 'dny'] 
+        # row += [x for x in otec["potomci"][0].keys() if x not in row if x != 'vek']
+        data.append(header)
         
         for pot in otec["potomci"]:
-            row = [pot.pop('cislo'), pot.pop('pohlavi')]
-            vek = pot.pop('vek')
-            row += vek.values()
-            for val in pot.values():
-                row.append(val)
+            row = [pot[x] for x in header]
+            # row = [pot.pop('Číslo'), pot.pop('Sex')]
+            # vek = pot.pop('vek')
+            # row += vek.values()
+            # for val in pot.values():
+            #     row.append(val)
             data.append(row)
         all_data.append({
             "otec" : otec["jmeno"],
             "data" : data,
-            "caption" : "%s, potomstvo (%s, %s)" % (otec["jmeno"], druh, ZOO)
+            "caption" : "Potomci samce druhu %s (\\textit{%s}) jménem %s v ZOO %s k 31.12.%i" % (
+                druh, TRANSLATE[druh], otec["jmeno"], ZOO, LAST_YEAR)
         })
 
     return all_data
@@ -243,8 +274,9 @@ def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5):
         length = len(data[0]) - 1
 
         # write header
-        a_file.write(u"\\begin{table}\n")
+        a_file.write(u"\\begin{table}[htb]\n")
         a_file.write(u"\\begin{adjustwidth}{%.1fcm}{}\n" % adjustwidth)
+        a_file.write(u"\\caption{%s}\n" % caption)
         a_file.write(u"\\begin{tabular}{l" + 'c'*length + "}\n")
         a_file.write(u"\t\\hline\n")
         for i in range(num_h_rows):
@@ -262,7 +294,6 @@ def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5):
         # write footer
         a_file.write("\t\\hline\n")
         a_file.write("\\end{tabular}\n")
-        a_file.write(u"\\caption{%s}\n" % caption)
         a_file.write("\\end{adjustwidth}\n")
         a_file.write("\\end{table}\n")
 
