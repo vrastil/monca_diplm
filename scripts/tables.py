@@ -319,7 +319,7 @@ def create_table_potomstva_summary(coll, druh, ZOO, all_data=None):
         narozen = transformuj_datum(otec['Narození'], form_in='out', form_out=False)
         if narozen:
             first_y = min(first_y, narozen.year)
-        otec["Narození"] += otec["místo narození"]
+        # otec["Narození"] += otec["místo narození"]
         row = [otec[x] for x in header]
         data.append(row)
     
@@ -345,7 +345,7 @@ def create_table_potomstva_summary(coll, druh, ZOO, all_data=None):
         narozen = transformuj_datum(matka['Narození'], form_in='out', form_out=False)
         if narozen:
             first_y = min(first_y, narozen.year)
-        matka["Narození"] += matka["místo narození"]
+        # matka["Narození"] += matka["místo narození"]
         row = [matka[x] for x in header]
         data.append(row)
     
@@ -455,7 +455,7 @@ def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5):
         a_file.write(u"\\begin{table}[htb]\n")
         a_file.write(u"\\begin{adjustwidth}{%.1fcm}{}\n" % adjustwidth)
         a_file.write(u"\\caption{%s}\n" % caption)
-        a_file.write(u"\\begin{tabular}{l" + 'c'*length + "}\n")
+        a_file.write(u"\\begin{tabular}{l" + 'l'*length + "}\n")
         a_file.write(u"\t\\hline\n")
         for i in range(num_h_rows):
             row = [str(x) for x in data[i]]
@@ -752,6 +752,6 @@ def create_all_tables(out_opt, coll_roc, coll_knihy):
             create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func, xls_func, adjustwidth)
 
     # save all
-    xlsx_file = out_opt['dir'] + 'tables/zpracovane_vse.xlsx'
+    xlsx_file = out_opt['dir'] + 'zpracovane_vse.xlsx'
     xls.save_xlsx(xlsx_file, all_data)
     print("Ulozeno do %s" % xlsx_file)

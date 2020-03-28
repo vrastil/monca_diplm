@@ -22,6 +22,8 @@ def get_keys(sheet):
 
     return all_keys, all_subkeys
 
+def is_string_key(key):
+    return key in ['místo narození', 'odchod (kam)', 'poznámka']
     
 def get_doc_from_row(row, all_keys, all_subkeys):
     # ignore rows starting with empty cell
@@ -37,6 +39,10 @@ def get_doc_from_row(row, all_keys, all_subkeys):
     doc = {}
     for cell, key, subkey in zip(row, all_keys, all_subkeys):
         value = cell.value if cell.value is not None else 0
+        # special handling of empty string (otherwise 0)
+        if is_string_key(key) and not value:
+            value = ""
+
         # no subkeys
         if subkey is None:
             doc[key] = value
