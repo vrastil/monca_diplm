@@ -446,15 +446,19 @@ def create_table_history(coll):
 
     return data
 
-def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5):
+def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5, suffix=''):
     with open(tex_file, 'w') as a_file:
         # get length
         length = len(data[0]) - 1
+
+        # get label
+        label = 'tab:' + tex_file.split('/')[-1].replace('.tex', '') + suffix
 
         # write header
         a_file.write(u"\\begin{table}[htb]\n")
         a_file.write(u"\\begin{adjustwidth}{%.1fcm}{}\n" % adjustwidth)
         a_file.write(u"\\caption{%s}\n" % caption)
+        a_file.write(u"\\label{%s}\n" % label)
         a_file.write(u"\\begin{tabular}{l" + 'l'*length + "}\n")
         a_file.write(u"\t\\hline\n")
         for i in range(num_h_rows):
@@ -475,7 +479,7 @@ def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5):
         a_file.write("\\end{adjustwidth}\n")
         a_file.write("\\end{table}\n")
 
-def tex_potomstvo(tex_file, all_data, caption, num_h_rows=1, adjustwidth=-2.5):
+def tex_potomstvo(tex_file, all_data, caption, num_h_rows=1, adjustwidth=-2.5, suffix=''):
     with open(tex_file, 'w') as a_file:
         zoo = last_zoo = None
         for val in all_data:
@@ -494,8 +498,11 @@ def tex_potomstvo(tex_file, all_data, caption, num_h_rows=1, adjustwidth=-2.5):
             caption_otec = val["caption"]
             file_otec = tex_file.replace(".tex", "_%s.tex" % rodic.replace(" ", "_"))
             file_otec = unidecode.unidecode(file_otec)
-            save_tex(file_otec, data, caption_otec, num_h_rows, adjustwidth=-2.5)
-            a_file.write(u"\\input{../data/tables/%s}\n" % file_otec.split('/')[-1])
+            save_tex(file_otec, data, caption_otec, num_h_rows, adjustwidth=-2.5, suffix=suffix)
+            if suffix == '_app':
+                a_file.write(u"\\input{../data/tables/appendix/%s}\n" % file_otec.split('/')[-1])
+            else:
+                a_file.write(u"\\input{../data/tables/%s}\n" % file_otec.split('/')[-1])
 
 def xls_potomstvo(all_data):
     xls_data = []
@@ -590,7 +597,7 @@ def create_table_narozeni_rel(coll):
             row[i+1] = "%.1f" % (val*100.0/data_celkem[key])
     return data_all
 
-def create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func=save_tex, xls_func=None, adjustwidth=-0.5):
+def create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_dir, tex_file, num_h_rows, tex_func=save_tex, xls_func=None, adjustwidth=-0.5):
         print("  Tabulka %i: %s" % (i+1, caption))
         # get data
         data = data_func(**kwargs)
@@ -603,7 +610,8 @@ def create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_fi
             "header" : caption,
         })
         # save .tex file
-        tex_func(tex_file, data, caption, num_h_rows, adjustwidth)
+        tex_func(tex_dir + tex_file, data, caption, num_h_rows, adjustwidth)
+        tex_func(tex_dir + 'appendix/' + tex_file, data, caption, num_h_rows, adjustwidth, suffix='_app')
 
 def create_all_tables(out_opt, coll_roc, coll_knihy):
     table_setting = [
@@ -728,7 +736,8 @@ def create_all_tables(out_opt, coll_roc, coll_knihy):
         kwargs = setting['kwargs']
         sheet_name = setting['sheet_name']
         num_h_rows = setting.get('num_h_rows', 1)
-        tex_file = out_opt['dir'] + 'tables/' + setting['tex_file']
+        tex_dir =  out_opt['dir'] + 'tables/'
+        tex_file = setting['tex_file']
         data_func = setting['data_func']
         tex_func = setting.get("tex_func", save_tex)
         adjustwidth = setting.get("adjustwidth", -0.5)
@@ -742,14 +751,15 @@ def create_all_tables(out_opt, coll_roc, coll_knihy):
                 sheet_name = setting['sheet_name']
                 sheet_name = sheet_name.replace("MIN_YEAR", str(min_year))
                 sheet_name = sheet_name.replace("MAX_YEAR", str(max_year))
-                tex_file = out_opt['dir'] + 'tables/' + setting['tex_file']
+                tex_dir =  out_opt['dir'] + 'tables/'
+                tex_file = setting['tex_file']
                 tex_file = tex_file.replace("MIN_YEAR", str(min_year))
                 tex_file = tex_file.replace("MAX_YEAR", str(max_year))
                 kwargs["min_year"] = min_year
                 kwargs["max_year"] = max_year
-                create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func, xls_func, adjustwidth)
+                create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_dir, tex_file, num_h_rows, tex_func, xls_func, adjustwidth)
         else:
-            create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_file, num_h_rows, tex_func, xls_func, adjustwidth)
+            create_one_table(all_data, i, data_func, kwargs, caption, sheet_name, tex_dir, tex_file, num_h_rows, tex_func, xls_func, adjustwidth)
 
     # save all
     xlsx_file = out_opt['dir'] + 'zpracovane_vse.xlsx'
