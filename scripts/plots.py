@@ -6,19 +6,8 @@ from IPython.display import display
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
-TRANSLATE = {
-    'stav_end' : 'stav ke konci roku',
-    'stav_start' : 'stav na začátku roku',
-    'mrtve_nar_mlad' : 'mrtvě narozená mláďata',
-    'zive_nar_mlad' : 'živě narozená mláďata',
-    'uhyn_do_5d' : 'úhyn do 5 dnů',
-    'uhyn_do_3m' : 'úhyn do 3 měsíců',
-    'uhyn_do_12m' : 'úhyn do 12 měsíců',
-    'porody' : 'porody',
-    'odchov' : 'odchov'
-}
 
-def plot_basic(data, suptitle="", out_opt=None, bar=False):
+def plot_basic(data, suptitle, out_opt, bar=False):
     fig = plt.figure(figsize=(14,10))
     ax = plt.gca()
 
@@ -38,10 +27,10 @@ def plot_basic(data, suptitle="", out_opt=None, bar=False):
     ax.legend()
     fig.suptitle(suptitle, size=30, y=0.94)
     plt.show()
-    filename = out_opt['dir'] + out_opt['filename']
+    filename = out_opt['dir'] + 'plots/' + out_opt['filename']
     fig.savefig(filename, format="png")
 
-def plot_all_zoo_rok(db, druh, cat, out_opt=None):
+def plot_all_zoo_rok(db, druh, cat, out_opt):
     query = {
         'Druh' : druh,
     }
@@ -49,14 +38,14 @@ def plot_all_zoo_rok(db, druh, cat, out_opt=None):
     proj = {
         '_id' : 0,
         'Rok' : 1,
-        'Zoo' : 1,
+        'ZOO' : 1,
         cat : 1
     }
 
     my_data = {}
 
     for doc in db.find(query, proj):
-        zoo = doc['Zoo']
+        zoo = doc['ZOO']
         rok = doc['Rok']
         narozeny = sum(list(doc[cat].values()))
         
@@ -65,41 +54,65 @@ def plot_all_zoo_rok(db, druh, cat, out_opt=None):
         my_data[zoo].append([rok, narozeny])
 
     # plot
-    if out_opt is None:
-        out_opt = OUT_OPT_DEF
-    suptitle = druh + ' (' + TRANSLATE[cat] + ')'
+    suptitle = druh + ' (' + cat + ')'
     out_opt['filename'] = druh.replace(' ', '_') + '_' + cat.replace(' ', '_') + '.png'
     plot_basic(my_data, suptitle, out_opt=out_opt)
 
+def get_proj(proj, cat):
+    if '.' in cat:
+        cat = cat.split('.')[0]
+    proj[cat] = 1
 
-def plot_one_zoo_rok(db, druh, zoo, cats, out_opt=None, **kwargs):
-    query = {
-        'Druh' : druh,
-        'Zoo' : zoo
-    }
+def get_val(doc, cat, val=0):
+    # recursive cal
+    if '.' in cat:
+        key = cat.split('.')[0]
+        cat = '.'.join(cat.split('.')[1:])
+        val += get_val(doc[key], cat, val=val)
+    else:
+        if isinstance(doc[cat], dict):
+            val += sum(list(doc[cat].values()))
+        else:
+            val += doc[cat]
+    return val
+
+def plot_one_zoo_rok(db, druh, zoo, cats, out_opt, **kwargs):
+    query = {}
+    if isinstance(druh, str):
+        query['Druh'] = druh
+    else:
+        druh = ''
+    if isinstance(zoo, str):
+        query['ZOO'] = zoo
+    else:
+        zoo = ''
 
     proj = {
         '_id' : 0,
         'Rok' : 1,
     }
     for cat in cats:
-        proj[cat] = 1
+        get_proj(proj, cat)
 
-    my_data = {TRANSLATE[cat] : [] for cat in cats}
+    my_data = {cat : [] for cat in cats}
+
+    # first sum all years
+    tmp = {cat : {} for cat in cats}
 
     for doc in db.find(query, proj):
         rok = doc['Rok']
         for cat in cats:
-            if isinstance(doc[cat], dict):
-                pocet = sum(list(doc[cat].values()))
-            else:
-                pocet = doc[cat]
-            my_data[TRANSLATE[cat]].append([rok, pocet])
+            pocet = get_val(doc, cat)
+            pocet += tmp[cat].get(rok, 0)
+            tmp[cat][rok] = pocet
+
+    # then save to data for plot
+    # TODO use shorthand
+    for cat, data in tmp.items():
+        for rok, pocet in data.items():
+            my_data[cat].append([rok, pocet])
 
     # plot
-    if out_opt is None:
-        out_opt = OUT_OPT_DEF
-
     suptitle = druh + ', ' + zoo + ' (' + out_opt['suptitle'] + ')'
     out_opt['filename'] = druh.replace(' ', '_') + '_' + zoo.replace(' ', '_') + '_' + out_opt['suptitle'].replace(' ', '_') + '.png'
     if 'bar' in kwargs and kwargs['bar']:
@@ -107,7 +120,7 @@ def plot_one_zoo_rok(db, druh, zoo, cats, out_opt=None, **kwargs):
     plot_basic(my_data, suptitle, out_opt=out_opt, **kwargs)
 
 
-def plot_cats_rok(db, druh, cats, out_opt=None):
+def plot_cats_rok(db, druh, cats, out_opt):
     if druh is not None:
         query = {
             'Druh' : druh,
@@ -123,25 +136,22 @@ def plot_cats_rok(db, druh, cats, out_opt=None):
     for cat in cats:
         proj[cat] = 1
 
-    my_data = {TRANSLATE[cat] : [] for cat in cats}
+    my_data = {cat : [] for cat in cats}
 
     all_doc = list(db.find(query, proj))
     roky = sorted(set([doc['Rok'] for doc in all_doc]))
 
     for cat in cats:
-        my_data[TRANSLATE[cat]] = [[rok, 0] for rok in roky]
+        my_data[cat] = [[rok, 0] for rok in roky]
 
     for doc in all_doc:
         rok = doc['Rok']
         for cat in cats:
             pocet = sum(list(doc[cat].values()))
-            item = next(x for x in my_data[TRANSLATE[cat]] if x[0] == rok)
+            item = next(x for x in my_data[cat] if x[0] == rok)
             item[1] += pocet
 
     # plot
-    if out_opt is None:
-        out_opt = OUT_OPT_DEF
-
     suptitle = druh + ' (' + out_opt['suptitle'] + ')'
     out_opt['filename'] = druh.replace(' ', '_') + '_' + out_opt['suptitle'].replace(' ', '_') + '.png'
     plot_basic(my_data, suptitle, out_opt=out_opt)

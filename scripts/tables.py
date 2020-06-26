@@ -5,7 +5,7 @@ from dateutil.relativedelta import relativedelta
 
 import xlsx_manipulation as xls
 
-LAST_YEAR = 2018
+LAST_YEAR = 2019
 
 TRANSLATE = {
     'Lemur kata': 'Lemur catta',
