@@ -455,10 +455,12 @@ def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5, suffix='')
         label = 'tab:' + tex_file.split('/')[-1].replace('.tex', '') + suffix
 
         # write header
+        
         a_file.write(u"\\begin{table}[htb]\n")
         a_file.write(u"\\begin{adjustwidth}{%.1fcm}{}\n" % adjustwidth)
         a_file.write(u"\\caption{%s}\n" % caption)
         a_file.write(u"\\label{%s}\n" % label)
+        a_file.write(u"\\noindent\\adjustbox{max width=\\columnwidth}{%\n")
         a_file.write(u"\\begin{tabular}{l" + 'l'*length + "}\n")
         a_file.write(u"\t\\hline\n")
         for i in range(num_h_rows):
@@ -475,7 +477,7 @@ def save_tex(tex_file, data, caption, num_h_rows=1, adjustwidth=-0.5, suffix='')
 
         # write footer
         a_file.write("\t\\hline\n")
-        a_file.write("\\end{tabular}\n")
+        a_file.write("\\end{tabular}}\n")
         a_file.write("\\end{adjustwidth}\n")
         a_file.write("\\end{table}\n")
 

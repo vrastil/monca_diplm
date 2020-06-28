@@ -13,6 +13,7 @@ LAST_YEAR = 2019
 
 DEFAULT_PLOT_OPT = {
     'figsize': (14, 10),
+    'no_suptitle': True,
     'suptitle_size': 30,
     'suptitle_y': 0.94,
 }
@@ -67,7 +68,8 @@ def plot_basic(data, suptitle, out_opt, bar=False, plot_opt=None, tex_opt=None):
             i += 1
 
     ax.legend()
-    fig.suptitle(suptitle, size=plot_opt['suptitle_size'], y=plot_opt['suptitle_y'])
+    if not plot_opt['no_suptitle']:
+        fig.suptitle(suptitle, size=plot_opt['suptitle_size'], y=plot_opt['suptitle_y'])
 
     if out_opt.get('show', True):
         plt.show()
@@ -274,7 +276,7 @@ def create_all_plots(coll, out_opt):
                 'filename': 'porodnost_vse',
                 'suptitle': 'Porodnost mláďať v ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
                 'tex_opt': {
-                    'caption': 'XXX',
+                    'caption': 'Porodnost mláďať v ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
                 }
             },
         },
@@ -289,7 +291,7 @@ def create_all_plots(coll, out_opt):
                 'suptitle': 'Porodnost mláďať druhu #DRUH#\nv ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
                 'plot_opt' : {'suptitle_y' : 0.99},
                 'tex_opt': {
-                    'caption': 'XXX',
+                    'caption': 'Porodnost mláďať druhu #DRUH# v ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
                     'tex_file':  out_opt['dir'] + 'plots/main/' + 'porodnost_druhy.tex',
                 }
             },
