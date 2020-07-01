@@ -135,7 +135,7 @@ def get_val(doc, cat, val=0):
             val += doc[cat]
     return val
 
-def plot_one_zoo_rok(db, out_opt, druh=None, zoo=None, cats=None, legends=None, filename='', suptitle='', **kwargs):
+def get_data_one_zoo_rok(db, druh=None, zoo=None, cats=None):
     query = {}
     if isinstance(druh, str):
         query['Druh'] = druh
@@ -171,10 +171,55 @@ def plot_one_zoo_rok(db, out_opt, druh=None, zoo=None, cats=None, legends=None, 
         for rok, pocet in data.items():
             my_data[cat].append([rok, pocet])
 
+    return my_data
+
+def moving_average(a, n=3) :
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
+    
+def plot_one_zoo_rok(db, out_opt, druh=None, zoo=None, cats=None, legends=None, filename='', suptitle='', **kwargs):
+    # get data
+    my_data = get_data_one_zoo_rok(db, druh=druh, zoo=zoo, cats=cats)
+
     # rename categories
     if legends is not None and len(cats) == len(legends):
         for cat, legend in zip(cats, legends):
             my_data[legend] = my_data.pop(cat)
+
+    # plot
+    out_opt['filename'] = filename + '.png'
+    if 'bar' in kwargs and kwargs['bar']:
+        out_opt['filename'] = out_opt['filename'].replace('.png', '_' + ''.join([x[0] for x in cats]) + '_bar.png')
+    plot_basic(my_data, suptitle, out_opt=out_opt, **kwargs)
+
+
+def plot_one_zoo_rok_ratio(db, out_opt, druh=None, zoo=None, cats_nom=None, cats_denom=None, legends=None, filename='', suptitle='', **kwargs):
+    # check lengths
+    if len(cats_nom) != len(cats_denom):
+        print(f'ERROR! Different lengths of arrays cats_nom and cats_denom')
+        return
+
+    # get data
+    cats = cats_nom + cats_denom
+    my_data = get_data_one_zoo_rok(db, druh=druh, zoo=zoo, cats=cats)
+
+    # divide and rename categories
+    if legends is None:
+        legends = [f'{cats_nom[i]} / {cats_denom[i]}' for i in range(len(cats_nom))]
+
+    for cat_nom, cat_denom, legend in zip(cats_nom, cats_denom, legends):
+        # get data and check years
+        data_nom = np.array(my_data.pop(cat_nom))
+        data_denom = np.array(my_data.pop(cat_denom))
+        if np.any(data_nom[:,0] != data_denom[:,0]):
+            print(f'ERROR! Different years in arrays cats_nom and cats_denom')
+            return
+
+        ratio = moving_average(data_nom[:,1] / data_denom[:,1], n=5)
+        years = moving_average(data_nom[:,0], n=5)
+        my_data[legend] = np.array([years, ratio]).transpose()
+        
 
     # plot
     out_opt['filename'] = filename + '.png'
@@ -276,26 +321,42 @@ def create_all_plots(coll, out_opt):
                 'filename': 'porodnost_vse',
                 'suptitle': 'Porodnost mláďať v ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
                 'tex_opt': {
-                    'caption': 'Porodnost mláďať v ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
+                    'caption': 'Porodnost mláďať v ČR v letech %i --- %i' % (FIRST_YEAR, LAST_YEAR),
                 }
             },
         },
+        # {
+        #     'name': 'Porodnost za vsechny ZOO, jednotlive druhy',
+        #     'plot_func': plot_one_zoo_rok_multiple,
+        #     'kwargs': {
+        #         'druh_mlt': True,
+        #         'cats': ['stav k začátku roku.samice', 'živě narozená mláďata'],
+        #         'legends': ['počet samic' ,'živě narozená mláďata'],
+        #         'filename': 'porodnost_#DRUH#',
+        #         'suptitle': 'Porodnost mláďať druhu #DRUH#\nv ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
+        #         'plot_opt' : {'suptitle_y' : 0.99},
+        #         'tex_opt': {
+        #             'caption': 'Porodnost mláďať druhu #DRUH# v ČR v letech %i --- %i' % (FIRST_YEAR, LAST_YEAR),
+        #             'tex_file':  out_opt['dir'] + 'plots/main/' + 'porodnost_druhy.tex',
+        #         }
+        #     },
+        # },
         {
-            'name': 'Porodnost za vsechny ZOO, jednotlive druhy',
-            'plot_func': plot_one_zoo_rok_multiple,
+            'name': 'Porodnost (relativne dle samic) za vsechny ZOO a vsechny druhy',
+            'plot_func': plot_one_zoo_rok_ratio,
             'kwargs': {
-                'druh_mlt': True,
-                'cats': ['stav k začátku roku.samice', 'živě narozená mláďata'],
-                'legends': ['počet samic' ,'živě narozená mláďata'],
-                'filename': 'porodnost_#DRUH#',
-                'suptitle': 'Porodnost mláďať druhu #DRUH#\nv ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
-                'plot_opt' : {'suptitle_y' : 0.99},
+                'druh': None,
+                'zoo': None,
+                'cats_nom': ['živě narozená mláďata'],
+                'cats_denom': ['stav k začátku roku.samice'],
+                # 'legends': ['počet samic' ,'živě narozená mláďata'],
+                'filename': 'porodnost_rel_vse',
+                'suptitle': 'Relativní porodnost mláďať v ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
                 'tex_opt': {
-                    'caption': 'Porodnost mláďať druhu #DRUH# v ČR v letech %i - %i' % (FIRST_YEAR, LAST_YEAR),
-                    'tex_file':  out_opt['dir'] + 'plots/main/' + 'porodnost_druhy.tex',
+                    'caption': 'Relativní porodnost mláďať vzhledem k počtu samic v ČR v letech %i --- %i. Data jsou průměrována vždy za posledních 5 let.' % (FIRST_YEAR, LAST_YEAR),
                 }
             },
-        }
+        },
     ]
 
     print("Prochazim celkem %i grafu:" % len(plots_settings))
